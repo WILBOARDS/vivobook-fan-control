@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "https://specifications.freedesktop.org/polkit/latest/policyconfig-1.dtd">
+<policyconfig>
+
+  <vendor>Vivobook Fan Control</vendor>
+  <icon_name>vivobook-fan-control</icon_name>
+
+  <action id="org.vivobookfancontrol.helper">
+    <description>Change the CPU and GPU fan control mode</description>
+    <message>Authentication is required to change the ASUS fan control mode.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/vivobook-fan-control/fancontrol-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+</policyconfig>

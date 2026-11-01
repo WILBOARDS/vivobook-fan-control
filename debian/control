@@ -1,0 +1,24 @@
+Source: vivobook-fan-control
+Section: utils
+Priority: optional
+Maintainer: Wilbert <kufgr@localhost>
+Build-Depends: cmake, ninja-build, qt6-base-dev, dpkg-dev
+Standards-Version: 4.6.2
+
+Package: vivobook-fan-control
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Wilbert <kufgr@localhost>
+Section: utils
+Priority: optional
+Depends: @SHLIBS@, pkexec
+Recommends: systemd
+Description: Control and monitor the fans of an ASUS Vivobook laptop
+ Reads the asus hwmon device exposed by the M7400QE (and similar Vivobook
+ models) and lets you switch each fan between firmware automatic control and
+ full speed.
+ .
+ Ships both a Qt 6 graphical window with live RPM, temperatures, history
+ graphs and a tray menu, and a fanctl command line interface. Fan changes go
+ through a polkit-authorized root helper, so no world-writable sysfs nodes or
+ sudo rules are needed. Optionally the chosen modes are re-applied at boot.

@@ -1,0 +1,13 @@
+[Unit]
+Description=Restore ASUS Vivobook fan control modes
+Documentation=man:systemd.service(8)
+Wants=systemd-udev-trigger.service
+After=systemd-udev-trigger.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/vivobook-fan-control/fancontrol-helper restore
+Nice=0
+
+[Install]
+WantedBy=multi-user.target

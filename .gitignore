@@ -1,0 +1,9 @@
+build/
+build-*/
+debian/stage/
+debian/out/
+debian/substvars
+debian/files
+debian/*.debhelper*
+CMakeLists.txt.user
+*.png.tmp

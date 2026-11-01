@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Vivobook Fan Control
+GenericName=Hardware monitoring
+Comment=Monitor and control the CPU and GPU fans of an ASUS Vivobook
+Exec=vivobook-fan-control
+Icon=vivobook-fan-control
+Terminal=false
+Categories=System;Monitor;
+Keywords=fan;cooling;temperature;sensor;asus;vivobook;
+StartupNotify=true
