@@ -29,6 +29,10 @@ lets you switch between those two modes from the GUI or the shell.
 
 ## Install the .deb
 
+Download `vivobook-fan-control_1.0.0_amd64.deb` from the
+[latest release](https://github.com/WILBOARDS/vivobook-fan-control/releases/latest),
+then:
+
 ```bash
 # 1. Install (pulls in the Qt 6 runtime libraries automatically)
 sudo dpkg -i vivobook-fan-control_1.0.0_amd64.deb
@@ -50,7 +54,7 @@ Then launch **Vivobook Fan Control** from your application menu, or run
 sudo apt install cmake ninja-build g++ qt6-base-dev dpkg-dev
 
 # 2. Clone and build
-git clone https://github.com/<you>/vivobook-fan-control.git
+git clone https://github.com/WILBOARDS/vivobook-fan-control.git
 cd vivobook-fan-control
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
