@@ -31,5 +31,16 @@ Result setBootRestoreSync(bool enabled);
 
 bool bootRestoreEnabled();
 
+// Temperature policy thresholds and the root daemon that applies them.
+void setPolicyConfig(const QStringList &assignments, ResultHandler handler);
+void setPolicyService(bool enabled, ResultHandler handler);
+Result setPolicyConfigSync(const QStringList &assignments);
+Result setPolicyServiceSync(bool enabled);
+bool policyServiceEnabled();
+
+// Tray autostart is a user unit, so it needs no polkit authorisation.
+bool trayAutostartEnabled();
+Result setTrayAutostart(bool enabled);
+
 }  // namespace controller
 }  // namespace fanctl

@@ -26,6 +26,34 @@ namespace {
 
 const QString kHelperPath = QStringLiteral("/usr/libexec/vivobook-fan-control/fancontrol-helper");
 const QString kService = QStringLiteral("vivobook-fan-restore.service");
+const QString kPolicyService = QStringLiteral("vivobook-fan-policy.service");
+const QString kTrayService = QStringLiteral("vivobook-fan-control.service");
+
+bool unitEnabled(const QStringList &arguments)
+{
+    QProcess process;
+    process.start(QStringLiteral("systemctl"), arguments);
+    if (!process.waitForStarted(3000) || !process.waitForFinished(3000))
+        return false;
+    // is-enabled exits non-zero for disabled units while still printing the state.
+    return QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed() == QStringLiteral("enabled");
+}
+
+Result runSystemctl(const QStringList &arguments)
+{
+    QProcess process;
+    process.start(QStringLiteral("systemctl"), arguments);
+    if (!process.waitForStarted(5000))
+        return Result::failure(QStringLiteral("Could not run systemctl."));
+    if (!process.waitForFinished(30000)) {
+        process.kill();
+        return Result::failure(QStringLiteral("systemctl did not finish in time."));
+    }
+    const QString output = QString::fromLocal8Bit(process.readAll()).trimmed();
+    if (process.exitCode() != 0)
+        return Result::failure(output.isEmpty() ? QStringLiteral("systemctl failed.") : output);
+    return Result::success(output);
+}
 
 QString describeFailure(int exitCode, const QString &output)
 {
@@ -113,13 +141,68 @@ Result setBootRestoreSync(bool enabled)
     return runSync({QStringLiteral("boot"), enabled ? QStringLiteral("on") : QStringLiteral("off")});
 }
 
+void setPolicyConfig(const QStringList &assignments, ResultHandler handler)
+{
+    QStringList arguments{QStringLiteral("policy"), QStringLiteral("set")};
+    arguments.append(assignments);
+    run(arguments, std::move(handler));
+}
+
+void setPolicyService(bool enabled, ResultHandler handler)
+{
+    run({QStringLiteral("service"), enabled ? QStringLiteral("on") : QStringLiteral("off")},
+        std::move(handler));
+}
+
+Result setPolicyConfigSync(const QStringList &assignments)
+{
+    QStringList arguments{QStringLiteral("policy"), QStringLiteral("set")};
+    arguments.append(assignments);
+    return runSync(arguments);
+}
+
+Result setPolicyServiceSync(bool enabled)
+{
+    return runSync({QStringLiteral("service"), enabled ? QStringLiteral("on") : QStringLiteral("off")});
+}
+
+bool policyServiceEnabled()
+{
+    return unitEnabled({QStringLiteral("is-enabled"), kPolicyService});
+}
+
+bool trayAutostartEnabled()
+{
+    return unitEnabled({QStringLiteral("--user"), QStringLiteral("is-enabled"), kTrayService});
+}
+
+Result setTrayAutostart(bool enabled)
+{
+    if (!enabled)
+        return runSystemctl({QStringLiteral("--user"), QStringLiteral("disable"),
+                             QStringLiteral("--now"), kTrayService});
+
+    // A user unit inherits the user manager's environment, not the desktop's, so
+    // the display variables have to be handed over before the tray can appear.
+    QStringList imported;
+    for (const QString &name : {QStringLiteral("WAYLAND_DISPLAY"), QStringLiteral("DISPLAY"),
+                                QStringLiteral("XDG_SESSION_TYPE"), QStringLiteral("XDG_CURRENT_DESKTOP")}) {
+        if (qEnvironmentVariableIsSet(qPrintable(name)))
+            imported.append(name);
+    }
+    if (!imported.isEmpty()) {
+        QStringList arguments{QStringLiteral("--user"), QStringLiteral("import-environment")};
+        arguments.append(imported);
+        runSystemctl(arguments);
+    }
+
+    return runSystemctl({QStringLiteral("--user"), QStringLiteral("enable"), QStringLiteral("--now"),
+                         kTrayService});
+}
+
 bool bootRestoreEnabled()
 {
-    QProcess process;
-    process.start(QStringLiteral("systemctl"), {QStringLiteral("is-enabled"), kService});
-    if (!process.waitForStarted(3000) || !process.waitForFinished(3000))
-        return false;
-    return QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed() == QStringLiteral("enabled");
+    return unitEnabled({QStringLiteral("is-enabled"), kService});
 }
 
 }  // namespace controller

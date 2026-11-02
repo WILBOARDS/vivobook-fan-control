@@ -41,6 +41,11 @@ Machine discoverMachine(QString *error = nullptr);
 
 QVector<FanStatus> readFanStatuses(const Machine &machine);
 
+// Writes pwmN_enable and reads it back, because sysfs accepts a write even when
+// the firmware refuses the mode. Callers must hold permission to write sysfs,
+// i.e. the root helper or the policy daemon.
+bool writeFanMode(const Machine &machine, const FanSpec &fan, int mode, QString *error = nullptr);
+
 std::optional<double> readCpuTemp();
 std::optional<double> readGpuTemp();
 

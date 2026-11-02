@@ -1,0 +1,17 @@
+[Unit]
+Description=Vivobook Fan Control in the background
+Documentation=https://github.com/WILBOARDS/vivobook-fan-control
+PartOf=graphical-session.target
+After=graphical-session.target
+RefuseManualStart=no
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vivobook-fan-control --tray
+Restart=no
+# The session bus is always needed; the display variables are imported by the
+# desktop session, and by this app when it enables the unit.
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+
+[Install]
+WantedBy=graphical-session.target

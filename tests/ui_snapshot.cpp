@@ -16,7 +16,7 @@ int main(int argc, char *argv[])
     const int dwellSeconds = argc > 2 ? QString::fromLocal8Bit(argv[2]).toInt() : 16;
 
     fanctl::MainWindow window;
-    window.resize(760, 640);
+    window.resize(760, 860);
     window.show();
 
     QTimer::singleShot(dwellSeconds * 1000, &app, [&window, output]() {

@@ -22,20 +22,58 @@ lets you switch between those two modes from the GUI or the shell.
 | Live readout | CPU and GPU fan RPM, plus CPU (`k10temp`) and GPU (`amdgpu`) temperatures, refreshed every 2 s |
 | Mode control | Switch each fan independently between **Automatic** and **Full speed** |
 | History graphs | 5-minute rolling charts for temperature and fan speed, painted with `QPainter` (no Qt Charts dependency) |
-| Tray menu | Quick "all fans automatic / full speed" actions, with live RPM in the tooltip |
+| Tray + background | Close the window and choose tray or quit (rememberable); optionally start with the session as a systemd user service |
+| Temperature policy | A root service that forces full speed above a threshold and back to automatic below it, per fan |
 | Restore at boot | Optionally re-apply your chosen modes early in the next boot via a systemd unit |
 | CLI parity | Every GUI action is also available on the command line, sharing one codebase |
 | No sudo rules | Writes go through a polkit-authorized root helper; sysfs stays root-owned |
 
+## Run in the background
+
+Two separate things, both optional:
+
+**Stay in the tray.** Close the window and the app asks whether to minimize to the tray or
+quit, with a *Remember my choice* box so you only answer once. Clear that decision any
+time with:
+
+```bash
+rm ~/.config/vivobook-fan-control/vivobook-fan-control.conf
+```
+
+**Start with your session.** Tick **Run in the background at login** and the app enables
+`vivobook-fan-control.service`, a systemd **user** unit that launches
+`vivobook-fan-control --tray` into your graphical session. A user service needs no
+administrator rights, so this checkbox never prompts for a password. A lock file keeps a
+manual launch from creating a second tray icon; if the app is already running in the
+background, starting it again just tells you so.
+
+## Automatic fan policy
+
+Tick **Run the policy service in the background** to enable `vivobook-fan-policy.service`,
+a root service that watches temperatures and moves each fan on its own:
+
+- above the **full speed** threshold, the fan is forced to full speed
+- below the **back to automatic** threshold, control returns to the firmware
+- in between, nothing changes — that gap is the hysteresis that stops flapping
+
+Thresholds live in `/etc/vivobook-fan-control/policy.conf` and are re-read every check, so
+applying new values needs no restart. Reading them is unprivileged (the GUI and
+`policy show` never prompt); only the root helper writes them.
+
+Because the driver only offers automatic and full speed, this is a two-state policy, not a
+fan curve. While the service is on it owns the modes it manages, so a manual switch is
+overridden on the next check. The unit runs sandboxed: `ProtectSystem=strict` with
+`ReadWritePaths=/sys`, `NoNewPrivileges`, `PrivateTmp` and `ProtectHome`.
+
 ## Install the .deb
 
-Download `vivobook-fan-control_1.0.0_amd64.deb` from the
+Download `vivobook-fan-control_1.1.0_amd64.deb` from the
 [latest release](https://github.com/WILBOARDS/vivobook-fan-control/releases/latest),
 then:
 
 ```bash
 # 1. Install (pulls in the Qt 6 runtime libraries automatically)
-sudo dpkg -i vivobook-fan-control_1.0.0_amd64.deb
+sudo dpkg -i vivobook-fan-control_1.1.0_amd64.deb
 
 # 2. Fix up dependencies if dpkg reported any
 sudo apt --fix-broken install
@@ -65,10 +103,10 @@ cmake --build build
 
 # 4. Produce the .deb — no debhelper or root required
 ./scripts/build-deb.sh
-#    -> debian/out/vivobook-fan-control_1.0.0_amd64.deb
+#    -> debian/out/vivobook-fan-control_1.1.0_amd64.deb
 
 # 5. Install it
-sudo dpkg -i debian/out/vivobook-fan-control_1.0.0_amd64.deb
+sudo dpkg -i debian/out/vivobook-fan-control_1.1.0_amd64.deb
 ```
 
 ## Command line
@@ -80,8 +118,15 @@ vivobook-fanctl gpu auto|full         Set the GPU fan mode
 vivobook-fanctl all-auto              Restore both fans to automatic
 vivobook-fanctl all-full              Run both fans at full speed
 vivobook-fanctl boot on|off           Re-apply the chosen modes at boot
+vivobook-fanctl policy show           Show thresholds and whether the service runs
+vivobook-fanctl policy on|off         Run the policy service in the background
+vivobook-fanctl policy set k=v [...]  Change thresholds (cpu_full_above, cpu_auto_below,
+                                      gpu_full_above, gpu_auto_below, interval)
 vivobook-fanctl gui                   Open the graphical window
 ```
+
+The app also accepts `--tray` to start hidden in the tray, which is what the login service
+uses.
 
 Example:
 
@@ -135,10 +180,14 @@ org.vivobookfancontrol.policy  ──polkit action, auth_admin_keep
 |---|---|
 | `/usr/bin/vivobook-fan-control` | GUI and CLI binary |
 | `/usr/bin/vivobook-fanctl` | Symlink used for command line invocation |
-| `/usr/libexec/vivobook-fan-control/fancontrol-helper` | Root helper: `apply`, `restore`, `boot` |
+| `/usr/libexec/vivobook-fan-control/fancontrol-helper` | Root helper: `apply`, `restore`, `boot`, `policy`, `service` |
+| `/usr/libexec/vivobook-fan-control/fancontrol-policyd` | Root policy daemon loop |
 | `/usr/share/polkit-1/actions/org.vivobookfancontrol.policy` | Authorization rules for the helper |
 | `/usr/lib/systemd/system/vivobook-fan-restore.service` | One-shot unit that re-applies modes at boot |
+| `/usr/lib/systemd/system/vivobook-fan-policy.service` | The policy daemon |
+| `/usr/lib/systemd/user/vivobook-fan-control.service` | Starts the tray app with your session |
 | `/var/lib/vivobook-fan-control/modes` | The modes you last chose, e.g. `cpu=auto` |
+| `/etc/vivobook-fan-control/policy.conf` | Policy thresholds, world-readable |
 
 The helper discovers the hwmon device itself rather than accepting a path from the
 caller, validates every argument against a fixed vocabulary, never spawns a shell, and
@@ -163,6 +212,20 @@ policy deliberately does not use it. Make sure you are in the `sudo` group (`id 
 The CPU fan responds on the M7400QE (roughly 2500 → 6100 RPM). The GPU fan has been
 observed to stay near its idle speed even with `pwm2_enable=0`, because the firmware
 keeps regulating it. The mode is still written and reported correctly.
+
+**Starting the app says it is already running in the background**
+The login service instance holds `/tmp/vivobook-fan-control.lock`. Use its tray icon, or
+stop it with `systemctl --user disable --now vivobook-fan-control.service`.
+
+**A manual switch gets undone a few seconds later**
+The policy service is enabled and is re-asserting its thresholds. Turn it off, or widen the
+hysteresis band so the current temperature falls between the two values.
+
+**No tray icon appears**
+The desktop must provide a StatusNotifier host (`org.kde.StatusNotifierWatcher`). COSMIC,
+KDE and GNOME-with-extension do; on a desktop without one the status bar reports
+`tray unavailable`, closing the window simply quits, and the login service shows the window
+instead of hiding it.
 
 **You want no password prompt at all**
 You can make the sysfs nodes group-writable with a udev rule instead, but that lets any

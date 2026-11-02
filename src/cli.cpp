@@ -5,6 +5,7 @@
 #include <QTextStream>
 
 #include "core/controller.h"
+#include "core/policyconfig.h"
 #include "core/sensors.h"
 
 namespace fanctl {
@@ -26,6 +27,9 @@ void printUsage(const QString &program)
         "  %1 all-auto                  Restore both fans to automatic\n"
         "  %1 all-full                  Run both fans at full speed\n"
         "  %1 boot on|off               Remember fan modes and re-apply them at boot\n"
+        "  %1 policy show               Show the temperature policy and its service state\n"
+        "  %1 policy on|off             Run the policy service in the background\n"
+        "  %1 policy set <key=value>    Change thresholds (cpu_full_above, cpu_auto_below, ...)\n"
         "  %1 gui                       Open the graphical window\n"
         "\n"
         "Fan changes go through a polkit-authorized root helper, so you may be\n"
@@ -94,13 +98,59 @@ int setBoot(const QString &word)
     return 0;
 }
 
+int showPolicy()
+{
+    const fanctl::PolicyConfig config = loadPolicyConfig();
+    print(QStringLiteral("=== ASUS Vivobook Fan Policy ==="));
+    print(QStringLiteral("Service: %1")
+              .arg(controller::policyServiceEnabled() ? QStringLiteral("running")
+                                                     : QStringLiteral("stopped")));
+    print(QStringLiteral("CPU: full above %1 C, back to automatic below %2 C")
+              .arg(config.cpuFullAbove).arg(config.cpuAutoBelow));
+    print(QStringLiteral("GPU: full above %1 C, back to automatic below %2 C")
+              .arg(config.gpuFullAbove).arg(config.gpuAutoBelow));
+    print(QStringLiteral("Check interval: %1 s").arg(config.intervalSeconds));
+    print();
+    print(QStringLiteral("Config file: %1").arg(policyConfigPath()));
+    return 0;
+}
+
+int runPolicy(const QStringList &rest)
+{
+    if (rest.isEmpty() || rest.at(0) == QStringLiteral("show"))
+        return showPolicy();
+
+    const QString verb = rest.at(0);
+    if (verb == QStringLiteral("on") || verb == QStringLiteral("off")) {
+        const bool enable = verb == QStringLiteral("on");
+        const Result result = controller::setPolicyServiceSync(enable);
+        print(result.message.isEmpty() ? QStringLiteral("Policy service %1.").arg(verb) : result.message);
+        return result.ok ? 0 : 1;
+    }
+
+    if (verb == QStringLiteral("set")) {
+        const QStringList assignments = rest.mid(1);
+        if (assignments.isEmpty()) {
+            print(QStringLiteral("Usage: policy set cpu_full_above=85 cpu_auto_below=75 "
+                                 "gpu_full_above=85 gpu_auto_below=75 interval=5"));
+            return 1;
+        }
+        const Result result = controller::setPolicyConfigSync(assignments);
+        print(result.message.isEmpty() ? QStringLiteral("Policy thresholds saved.") : result.message);
+        return result.ok ? 0 : 1;
+    }
+
+    print(QStringLiteral("Policy must be show, on, off or set"));
+    return 1;
+}
+
 const QStringList &cliVerbs()
 {
     static const QStringList verbs = {QStringLiteral("status"), QStringLiteral("cpu"),
                                       QStringLiteral("gpu"), QStringLiteral("all-auto"),
                                       QStringLiteral("all-full"), QStringLiteral("boot"),
-                                      QStringLiteral("gui"), QStringLiteral("help"),
-                                      QStringLiteral("version")};
+                                      QStringLiteral("policy"), QStringLiteral("gui"),
+                                      QStringLiteral("help"), QStringLiteral("version")};
     return verbs;
 }
 
@@ -148,6 +198,8 @@ int runCli(const QStringList &arguments)
         return setFans(QStringLiteral("all"), QStringLiteral("full"));
     if (verb == QStringLiteral("boot"))
         return setBoot(second);
+    if (verb == QStringLiteral("policy"))
+        return runPolicy(arguments.mid(1));
     if (verb == QStringLiteral("version")) {
         print(QStringLiteral("vivobook-fan-control %1").arg(QCoreApplication::applicationVersion()));
         return 0;

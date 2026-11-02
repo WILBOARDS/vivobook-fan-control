@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDateTime>
@@ -9,8 +10,11 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
+#include <QPushButton>
+#include <QSettings>
 #include <QShortcut>
 #include <QStatusBar>
 #include <QSystemTrayIcon>
@@ -22,6 +26,7 @@
 #include "core/controller.h"
 #include "ui/fancard.h"
 #include "ui/historychart.h"
+#include "ui/policypanel.h"
 
 namespace fanctl {
 namespace {
@@ -144,6 +149,16 @@ void MainWindow::buildControls()
     });
     m_bootCheck->setChecked(controller::bootRestoreEnabled());
 
+    m_autostartCheck = new QCheckBox(QStringLiteral("Run in the background at login"), this);
+    m_autostartCheck->setToolTip(QStringLiteral(
+        "Enables the systemd user service vivobook-fan-control.service, which starts this app in "
+        "the tray with your session. No administrator rights are needed for a user service."));
+    QObject::connect(m_autostartCheck, &QCheckBox::toggled, this, [this](bool enable) {
+        if (!m_syncingAutostart)
+            applyAutostart(enable);
+    });
+    m_autostartCheck->setChecked(controller::trayAutostartEnabled());
+
     auto *fullButton = new QToolButton(this);
     fullButton->setText(QStringLiteral("Blast both fans"));
     fullButton->setToolTip(QStringLiteral("Force both fans to full speed until you switch back."));
@@ -157,10 +172,19 @@ void MainWindow::buildControls()
 
     auto *row = new QHBoxLayout;
     row->addWidget(m_bootCheck);
+    row->addSpacing(16);
+    row->addWidget(m_autostartCheck);
     row->addStretch();
     row->addWidget(autoButton);
     row->addWidget(fullButton);
     m_root->addLayout(row);
+
+    m_policyPanel = new PolicyPanel(this);
+    QObject::connect(m_policyPanel, &PolicyPanel::statusMessage,
+                     [this](const QString &text, bool error) {
+                         statusBar()->showMessage(text, error ? 12000 : 6000);
+                     });
+    m_root->addWidget(m_policyPanel);
 }
 
 void MainWindow::buildTray()
@@ -296,6 +320,96 @@ void MainWindow::applyBootRestore(bool enable)
         }
         statusBar()->showMessage(result.message, 6000);
     });
+}
+
+void MainWindow::startHidden()
+{
+    if (m_tray)
+        return;
+    // Nothing to hide into, so a background start would leave the app unusable.
+    show();
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_quitting || !m_tray) {
+        event->accept();
+        return;
+    }
+
+    QSettings settings;
+    const QString remembered = settings.value(QStringLiteral("closeAction")).toString();
+    if (settings.value(QStringLiteral("rememberCloseChoice"), false).toBool() && !remembered.isEmpty()) {
+        if (remembered == QLatin1String("tray")) {
+            hide();
+            event->ignore();
+            return;
+        }
+        m_quitting = true;
+        event->accept();
+        QApplication::quit();
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Keep running in the background?"));
+    box.setText(QStringLiteral("Vivobook Fan Control can stay in the tray so you can change fan "
+                               "modes without opening the window again."));
+    QPushButton *trayButton = box.addButton(QStringLiteral("Minimize to tray"), QMessageBox::AcceptRole);
+    QPushButton *quitButton = box.addButton(QStringLiteral("Quit"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    auto *remember = new QCheckBox(QStringLiteral("Remember my choice"), &box);
+    box.setCheckBox(remember);
+    box.setDefaultButton(trayButton);
+    box.exec();
+
+    if (box.clickedButton() == trayButton) {
+        if (remember->isChecked()) {
+            settings.setValue(QStringLiteral("rememberCloseChoice"), true);
+            settings.setValue(QStringLiteral("closeAction"), QStringLiteral("tray"));
+        }
+        hide();
+        event->ignore();
+        return;
+    }
+
+    if (box.clickedButton() == quitButton) {
+        if (remember->isChecked()) {
+            settings.setValue(QStringLiteral("rememberCloseChoice"), true);
+            settings.setValue(QStringLiteral("closeAction"), QStringLiteral("quit"));
+        }
+        m_quitting = true;
+        event->accept();
+        QApplication::quit();
+        return;
+    }
+
+    event->ignore();
+}
+
+void MainWindow::applyAutostart(bool enable)
+{
+    m_autostartCheck->setEnabled(false);
+    statusBar()->showMessage(enable ? QStringLiteral("Enabling background start…")
+                                    : QStringLiteral("Disabling background start…"));
+
+    const Result result = controller::setTrayAutostart(enable);
+    m_autostartCheck->setEnabled(true);
+
+    m_syncingAutostart = true;
+    m_autostartCheck->setChecked(result.ok ? enable : !enable);
+    m_syncingAutostart = false;
+
+    if (result.ok) {
+        statusBar()->showMessage(enable ? QStringLiteral("Vivobook Fan Control will start with your "
+                                                         "session and stay in the tray.")
+                                        : QStringLiteral("Vivobook Fan Control will no longer start "
+                                                         "with your session."),
+                                 8000);
+    } else {
+        statusBar()->showMessage(result.message, 12000);
+    }
 }
 
 }  // namespace fanctl

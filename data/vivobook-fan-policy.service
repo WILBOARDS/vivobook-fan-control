@@ -1,0 +1,20 @@
+[Unit]
+Description=ASUS Vivobook fan temperature policy
+Documentation=https://github.com/WILBOARDS/vivobook-fan-control
+Wants=systemd-udev-trigger.service
+After=systemd-udev-trigger.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/vivobook-fan-control/fancontrol-policyd
+Restart=on-failure
+RestartSec=5
+# The daemon's only job is to write pwm*_enable, so keep everything else closed.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/sys
+
+[Install]
+WantedBy=multi-user.target

@@ -29,7 +29,8 @@ shlibvars="$root/debian/substvars"
 rm -f "$shlibvars"
 dpkg-shlibdeps -T"$shlibvars" \
     "$stage/usr/bin/vivobook-fan-control" \
-    "$stage/usr/libexec/vivobook-fan-control/fancontrol-helper" >/dev/null
+    "$stage/usr/libexec/vivobook-fan-control/fancontrol-helper" \
+    "$stage/usr/libexec/vivobook-fan-control/fancontrol-policyd" >/dev/null
 shlibs="$(sed -n 's/^shlibs:Depends=//p' "$shlibvars")"
 if [[ -z "$shlibs" ]]; then
     echo "dpkg-shlibdeps produced no dependency list" >&2

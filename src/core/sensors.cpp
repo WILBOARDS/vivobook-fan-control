@@ -146,6 +146,33 @@ QVector<FanStatus> readFanStatuses(const Machine &machine)
     return statuses;
 }
 
+bool writeFanMode(const Machine &machine, const FanSpec &fan, int mode, QString *error)
+{
+    const QString path = machine.path + QStringLiteral("/pwm%1_enable").arg(fan.index);
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (error)
+            *error = QStringLiteral("cannot open %1").arg(path);
+        return false;
+    }
+    file.write(QByteArray::number(mode));
+    file.flush();
+    file.close();
+
+    QFile check(path);
+    if (check.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        bool ok = false;
+        const int readBack = QString::fromLocal8Bit(check.readLine().trimmed()).toInt(&ok);
+        if (!ok || readBack != mode) {
+            if (error)
+                *error = QStringLiteral("%1 rejected mode %2 (still %3)").arg(path).arg(mode).arg(readBack);
+            return false;
+        }
+    }
+    return true;
+}
+
 std::optional<double> readCpuTemp()
 {
     auto value = readSensor(QStringLiteral("k10temp"), {QStringLiteral("Tctl"), QStringLiteral("TDIE")});

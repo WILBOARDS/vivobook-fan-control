@@ -17,6 +17,7 @@
 
 #include <cstdio>
 
+#include "core/policyconfig.h"
 #include "core/sensors.h"
 
 namespace {
@@ -26,6 +27,7 @@ using ModeMap = QMap<QString, QString>;
 const QString kStateDir = QStringLiteral("/var/lib/vivobook-fan-control");
 const QString kStateFile = kStateDir + QStringLiteral("/modes");
 const QString kService = QStringLiteral("vivobook-fan-restore.service");
+const QString kPolicyService = QStringLiteral("vivobook-fan-policy.service");
 
 void out(const QString &text)
 {
@@ -74,29 +76,13 @@ bool saveModes(const ModeMap &modes)
     return true;
 }
 
-bool writeEnable(const fanctl::Machine &machine, const fanctl::FanSpec &fan, int value)
+bool writeMode(const fanctl::Machine &machine, const fanctl::FanSpec &fan, int value)
 {
-    const QString path = machine.path + QStringLiteral("/pwm%1_enable").arg(fan.index);
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        err(QStringLiteral("cannot open %1").arg(path));
-        return false;
-    }
-    file.write(QByteArray::number(value));
-    file.flush();
-    file.close();
-
-    // sysfs accepts a write silently even when the firmware rejects the mode.
-    QFile check(path);
-    if (check.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        const int readBack = QString::fromLocal8Bit(check.readLine().trimmed()).toInt();
-        if (readBack != value) {
-            err(QStringLiteral("%1 rejected mode %2 (still %3)").arg(path).arg(value).arg(readBack));
-            return false;
-        }
-    }
-    return true;
+    QString error;
+    if (fanctl::writeFanMode(machine, fan, value, &error))
+        return true;
+    err(error);
+    return false;
 }
 
 int apply(const QStringList &args)
@@ -135,7 +121,7 @@ int apply(const QStringList &args)
 
     ModeMap modes = loadModes();
     for (const fanctl::FanSpec &fan : targets) {
-        if (!writeEnable(machine, fan, mode))
+        if (!writeMode(machine, fan, mode))
             return 3;
         modes.insert(fan.name, fanctl::modeToWord(mode));
         out(QStringLiteral("%1 fan set to %2").arg(fan.name, fanctl::modeToWord(mode)));
@@ -176,8 +162,27 @@ int restore(const QStringList &args)
         fanctl::ModeValue mode = fanctl::ModeAuto;
         if (!fanctl::modeFromWord(it.value(), &mode))
             continue;
-        if (writeEnable(machine, *spec, mode))
+        if (writeMode(machine, *spec, mode))
             out(QStringLiteral("restored %1 fan to %2").arg(it.key(), it.value()));
+    }
+    return 0;
+}
+
+int runSystemctl(const QStringList &arguments)
+{
+    QProcess process;
+    process.start(QStringLiteral("systemctl"), arguments);
+    if (!process.waitForStarted(5000)) {
+        err(QStringLiteral("cannot run systemctl"));
+        return 3;
+    }
+    if (!process.waitForFinished(30000)) {
+        err(QStringLiteral("systemctl timed out"));
+        return 3;
+    }
+    if (process.exitCode() != 0) {
+        err(QString::fromLocal8Bit(process.readAll()).trimmed());
+        return 3;
     }
     return 0;
 }
@@ -205,24 +210,64 @@ int boot(const QStringList &args)
         }
     }
 
-    QProcess process;
-    process.start(QStringLiteral("systemctl"),
-                  {enable ? QStringLiteral("enable") : QStringLiteral("disable"), kService});
-    if (!process.waitForStarted(5000)) {
-        err(QStringLiteral("cannot run systemctl"));
-        return 3;
-    }
-    if (!process.waitForFinished(20000)) {
-        err(QStringLiteral("systemctl timed out"));
-        return 3;
-    }
-    if (process.exitCode() != 0) {
-        err(QString::fromLocal8Bit(process.readAll()).trimmed());
-        return 3;
-    }
+    const int rc = runSystemctl({enable ? QStringLiteral("enable") : QStringLiteral("disable"),
+                                 QStringLiteral("--now"), kService});
+    if (rc != 0)
+        return rc;
 
     out(enable ? QStringLiteral("fan modes will be restored at boot")
                : QStringLiteral("fan modes will no longer be restored at boot"));
+    return 0;
+}
+
+int policy(const QStringList &args)
+{
+    if (args.isEmpty() || args.at(0) != QStringLiteral("set") || args.size() < 2) {
+        err(QStringLiteral("usage: policy set <key=value> [...]"
+                           " (cpu_full_above, cpu_auto_below, gpu_full_above, gpu_auto_below, interval)"));
+        return 1;
+    }
+
+    fanctl::PolicyConfig config = fanctl::loadPolicyConfig();
+    for (const QString &argument : args.mid(1)) {
+        QString error;
+        if (!fanctl::applyPolicyArgument(argument, &config, &error)) {
+            err(error);
+            return 1;
+        }
+    }
+
+    if (!config.isValid()) {
+        err(config.errorText());
+        return 1;
+    }
+
+    QString error;
+    if (!fanctl::savePolicyConfig(config, &error)) {
+        err(error);
+        return 3;
+    }
+
+    out(QStringLiteral("policy thresholds saved to %1").arg(fanctl::policyConfigPath()));
+    out(fanctl::policyConfigText(config).trimmed());
+    return 0;
+}
+
+int service(const QStringList &args)
+{
+    if (args.size() != 1 || (args.at(0) != QStringLiteral("on") && args.at(0) != QStringLiteral("off"))) {
+        err(QStringLiteral("usage: service <on|off>"));
+        return 1;
+    }
+
+    const bool enable = args.at(0) == QStringLiteral("on");
+    const int rc = runSystemctl({enable ? QStringLiteral("enable") : QStringLiteral("disable"),
+                                 QStringLiteral("--now"), kPolicyService});
+    if (rc != 0)
+        return rc;
+
+    out(enable ? QStringLiteral("temperature policy is now running in the background")
+               : QStringLiteral("temperature policy stopped"));
     return 0;
 }
 
@@ -231,7 +276,9 @@ void usage()
     out(QStringLiteral("vivobook fan control helper\n"
                        "  apply <cpu|gpu|all> <auto|full>\n"
                        "  restore\n"
-                       "  boot <on|off>"));
+                       "  boot <on|off>\n"
+                       "  policy set <key=value> [...]\n"
+                       "  service <on|off>"));
 }
 
 }  // namespace
@@ -261,6 +308,10 @@ int main(int argc, char *argv[])
         return restore(rest);
     if (verb == QStringLiteral("boot"))
         return boot(rest);
+    if (verb == QStringLiteral("policy"))
+        return policy(rest);
+    if (verb == QStringLiteral("service"))
+        return service(rest);
 
     err(QStringLiteral("unknown verb: %1").arg(verb));
     usage();
