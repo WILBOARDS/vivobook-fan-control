@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QFrame>
+#include <QGroupBox>
 
 #include <optional>
 
@@ -8,11 +8,10 @@
 
 class QLabel;
 class QRadioButton;
-class QButtonGroup;
 
 namespace fanctl {
 
-class FanCard : public QFrame {
+class FanCard : public QGroupBox {
     Q_OBJECT
 
 public:
@@ -32,10 +31,10 @@ private:
     FanSpec m_spec;
     QLabel *m_rpm = nullptr;
     QLabel *m_temp = nullptr;
-    QLabel *m_state = nullptr;
     QLabel *m_message = nullptr;
     QRadioButton *m_auto = nullptr;
     QRadioButton *m_full = nullptr;
+    bool m_busy = false;
 };
 
 }  // namespace fanctl

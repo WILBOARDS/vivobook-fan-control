@@ -6,6 +6,7 @@
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDateTime>
+#include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
 #include <QLabel>
@@ -13,20 +14,22 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
+#include <QPolygonF>
 #include <QPushButton>
 #include <QSettings>
 #include <QShortcut>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
-#include <QHBoxLayout>
 
 #include "core/controller.h"
 #include "ui/fancard.h"
 #include "ui/historychart.h"
-#include "ui/policypanel.h"
+#include "ui/settingspage.h"
+#include "ui/style.h"
 
 namespace fanctl {
 namespace {
@@ -57,6 +60,38 @@ QIcon appIcon()
     return QIcon(pixmap);
 }
 
+// The desktop icon theme has no dependable settings glyph, so the nav buttons
+// draw their own and stay identical on any theme. Everything is square-ended:
+// flat caps and mitre joins, no rounded corners.
+QIcon navIcon(const QString &kind, const QColor &color)
+{
+    QPixmap pixmap(64, 64);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    if (kind == QLatin1String("back")) {
+        painter.setPen(QPen(color, 8, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
+        painter.drawPolyline(QPolygonF() << QPointF(41, 13) << QPointF(22, 32) << QPointF(41, 51));
+    } else {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        for (int i = 0; i < 8; ++i) {
+            painter.save();
+            painter.translate(32, 32);
+            painter.rotate(i * 45.0);
+            painter.drawRect(QRectF(-4.5, -30, 9, 14));
+            painter.restore();
+        }
+        painter.drawEllipse(QRectF(12, 12, 40, 40));
+        painter.setCompositionMode(QPainter::CompositionMode_Clear);
+        painter.drawEllipse(QRectF(24, 24, 16, 16));
+    }
+
+    painter.end();
+    return QIcon(pixmap);
+}
+
 bool statusNotifierRegistered()
 {
     return QDBusConnection::sessionBus().isConnected()
@@ -70,42 +105,74 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("Vivobook Fan Control"));
     setWindowIcon(appIcon());
-    resize(760, 640);
-    setMinimumSize(560, 480);
+    resize(720, 600);
+    // Deliberately no setMinimumSize(): a hand-picked floor below what the layout
+    // needs makes Qt clip the bottom of the page instead of refusing to shrink.
 
     m_machine = discoverMachine(&m_discoveryError);
+    m_deviceName = m_machine.isValid() ? machineModel() : QStringLiteral("No fans to control");
+    // The status bar is narrow; the full sysfs path stays available on hover.
+    m_monitorName = m_machine.path.section(QLatin1Char('/'), -1);
 
     auto *central = new QWidget(this);
-    m_root = new QVBoxLayout(central);
+    auto *centralLayout = new QVBoxLayout(central);
+    style::applyPage(centralLayout);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
 
+    // One header above both pages: the title says where you are, the gear on the
+    // right is what moves between them.
     m_headline = new QLabel(central);
     QFont headlineFont = m_headline->font();
     headlineFont.setBold(true);
     headlineFont.setPointSizeF(headlineFont.pointSizeF() * 1.15);
     m_headline->setFont(headlineFont);
     m_headline->setWordWrap(true);
-    m_root->addWidget(m_headline);
+    m_headline->setText(m_deviceName);
+
+    m_navButton = new QToolButton(central);
+    m_navButton->setIconSize(QSize(20, 20));
+    m_navButton->setFixedSize(32, 32);
+    m_navButton->setAutoRaise(false);
+    // A flat square outline instead of the theme's rounded button.
+    m_navButton->setStyleSheet(QStringLiteral(
+        "QToolButton{border:1px solid palette(Mid);border-radius:0;background:transparent;}"
+        "QToolButton:hover{border-color:palette(Dark);background:palette(Mid);}"
+        "QToolButton:pressed{border-color:palette(Dark);background:palette(Dark);}"));
+    m_navButton->setAccessibleName(QStringLiteral("Settings"));
+    m_navButton->setToolTip(QStringLiteral("Startup and policy settings (Ctrl+,)"));
+    m_navButton->setShortcut(QKeySequence::Preferences);
+    m_navButton->setIcon(navIcon(QStringLiteral("gear"),
+                                 m_navButton->palette().color(QPalette::ButtonText)));
+    QObject::connect(m_navButton, &QToolButton::clicked, this, [this] {
+        if (!m_pages)
+            return;
+        showPage(m_pages->currentIndex() == PageOverview ? PageSettings : PageOverview);
+    });
+
+    auto *header = new QHBoxLayout;
+    header->setContentsMargins(style::kPageMargin, style::kPageMargin, style::kPageMargin, 0);
+    header->setSpacing(style::kGap);
+    header->addWidget(m_headline);
+    header->addStretch();
+    header->addWidget(m_navButton);
+    centralLayout->addLayout(header);
 
     if (m_machine.isValid()) {
-        m_headline->setText(QStringLiteral("ASUS %1").arg(machineModel()));
-        buildCards();
-        m_tempChart = new HistoryChart(QStringLiteral("Temperature"), QStringLiteral("°C"), 0.0, 100.0,
-                                       central);
-        m_rpmChart = new HistoryChart(QStringLiteral("Fan speed"), QStringLiteral("rpm"), -1.0, -1.0,
-                                      central);
-        m_rpmChart->setRetentionSeconds(300);
-        m_root->addWidget(m_tempChart);
-        m_root->addWidget(m_rpmChart);
-        buildControls();
+        m_pages = new QStackedWidget(central);
+        m_pages->addWidget(buildOverview());
+        m_pages->addWidget(buildSettings());
+        QObject::connect(m_pages, &QStackedWidget::currentChanged, this, &MainWindow::syncPage);
+        centralLayout->addWidget(m_pages, 1);
     } else {
-        m_headline->setText(QStringLiteral("No fans to control"));
-        m_root->addStretch();
+        m_navButton->setVisible(false);
+        centralLayout->addWidget(style::hint(m_discoveryError, central));
+        centralLayout->addStretch(1);
     }
-    m_root->addStretch();
 
     setCentralWidget(central);
 
     m_pathLabel = new QLabel(central);
+    style::applyHint(m_pathLabel);
     statusBar()->addPermanentWidget(m_pathLabel);
 
     if (!m_machine.isValid()) {
@@ -113,7 +180,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         return;
     }
 
-    m_pathLabel->setText(m_machine.path);
+    m_pathLabel->setText(m_monitorName);
+    m_pathLabel->setToolTip(m_machine.path);
     buildTray();
 
     m_timer = new QTimer(this);
@@ -125,66 +193,84 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     QObject::connect(quit, &QShortcut::activated, qApp, &QApplication::quit);
 }
 
-void MainWindow::buildCards()
+QWidget *MainWindow::buildOverview()
 {
-    auto *row = new QHBoxLayout;
+    auto *page = new QWidget(this);
+    auto *layout = new QVBoxLayout(page);
+    style::applyPage(layout);
+
+    auto *cards = new QHBoxLayout;
+    cards->setSpacing(style::kSectionGap);
     for (const FanSpec &spec : m_machine.fans) {
-        auto *card = new FanCard(spec, this);
+        auto *card = new FanCard(spec, page);
         QObject::connect(card, &FanCard::modeRequested, this, &MainWindow::requestMode);
-        row->addWidget(card);
+        cards->addWidget(card);
         m_cards.append(card);
     }
-    m_root->addLayout(row);
-}
+    layout->addLayout(cards);
 
-void MainWindow::buildControls()
-{
-    m_bootCheck = new QCheckBox(QStringLiteral("Restore these fan modes at boot"), this);
-    m_bootCheck->setToolTip(QStringLiteral(
-        "Writes the modes you choose here to /var/lib/vivobook-fan-control/modes and re-applies "
-        "them early in the next boot."));
-    QObject::connect(m_bootCheck, &QCheckBox::toggled, this, [this](bool enable) {
-        if (!m_syncingBootCheck)
-            applyBootRestore(enable);
-    });
-    m_bootCheck->setChecked(controller::bootRestoreEnabled());
+    style::addSectionGap(layout);
 
-    m_autostartCheck = new QCheckBox(QStringLiteral("Run in the background at login"), this);
-    m_autostartCheck->setToolTip(QStringLiteral(
-        "Enables the systemd user service vivobook-fan-control.service, which starts this app in "
-        "the tray with your session. No administrator rights are needed for a user service."));
-    QObject::connect(m_autostartCheck, &QCheckBox::toggled, this, [this](bool enable) {
-        if (!m_syncingAutostart)
-            applyAutostart(enable);
-    });
-    m_autostartCheck->setChecked(controller::trayAutostartEnabled());
+    m_tempChart = new HistoryChart(QStringLiteral("Temperature"), QStringLiteral("°C"), 0.0, 100.0, page);
+    m_rpmChart = new HistoryChart(QStringLiteral("Fan speed"), QStringLiteral("rpm"), -1.0, -1.0, page);
+    m_rpmChart->setRetentionSeconds(300);
+    layout->addWidget(m_tempChart, 1);
+    layout->addWidget(m_rpmChart, 1);
 
-    auto *fullButton = new QToolButton(this);
-    fullButton->setText(QStringLiteral("Blast both fans"));
-    fullButton->setToolTip(QStringLiteral("Force both fans to full speed until you switch back."));
-    QObject::connect(fullButton, &QToolButton::clicked, this,
-                     [this] { requestMode(QStringLiteral("all"), ModeFull); });
+    style::addSectionGap(layout);
 
-    auto *autoButton = new QToolButton(this);
-    autoButton->setText(QStringLiteral("Return to automatic"));
-    QObject::connect(autoButton, &QToolButton::clicked, this,
+    auto *autoButton = new QPushButton(QStringLiteral("Return to automatic"), page);
+    QObject::connect(autoButton, &QPushButton::clicked, this,
                      [this] { requestMode(QStringLiteral("all"), ModeAuto); });
 
-    auto *row = new QHBoxLayout;
-    row->addWidget(m_bootCheck);
-    row->addSpacing(16);
-    row->addWidget(m_autostartCheck);
-    row->addStretch();
-    row->addWidget(autoButton);
-    row->addWidget(fullButton);
-    m_root->addLayout(row);
+    auto *fullButton = new QPushButton(QStringLiteral("Blast both fans"), page);
+    fullButton->setToolTip(QStringLiteral("Force both fans to full speed until you switch back."));
+    QObject::connect(fullButton, &QPushButton::clicked, this,
+                     [this] { requestMode(QStringLiteral("all"), ModeFull); });
 
-    m_policyPanel = new PolicyPanel(this);
-    QObject::connect(m_policyPanel, &PolicyPanel::statusMessage,
+    auto *actions = new QHBoxLayout;
+    actions->setContentsMargins(0, 0, 0, 0);
+    actions->setSpacing(style::kGap);
+    actions->addStretch();
+    actions->addWidget(autoButton);
+    actions->addWidget(fullButton);
+    layout->addLayout(actions);
+
+    return page;
+}
+
+QWidget *MainWindow::buildSettings()
+{
+    m_settings = new SettingsPage(this);
+    QObject::connect(m_settings, &SettingsPage::statusMessage, this,
                      [this](const QString &text, bool error) {
                          statusBar()->showMessage(text, error ? 12000 : 6000);
                      });
-    m_root->addWidget(m_policyPanel);
+
+    auto *back = new QShortcut(QKeySequence::Cancel, m_settings);
+    back->setContext(Qt::WidgetWithChildrenShortcut);
+    QObject::connect(back, &QShortcut::activated, this, [this] { showPage(PageOverview); });
+
+    return m_settings;
+}
+
+void MainWindow::showPage(Page page)
+{
+    m_pages->setCurrentIndex(page);
+}
+
+void MainWindow::syncPage()
+{
+    const bool settings = m_pages->currentIndex() == PageSettings;
+    m_headline->setText(settings ? QStringLiteral("Settings") : m_deviceName);
+    m_navButton->setIcon(navIcon(settings ? QStringLiteral("back") : QStringLiteral("gear"),
+                                 m_navButton->palette().color(QPalette::ButtonText)));
+    m_navButton->setAccessibleName(settings ? QStringLiteral("Back")
+                                            : QStringLiteral("Settings"));
+    m_navButton->setToolTip(settings ? QStringLiteral("Back to the fans (Esc)")
+                                     : QStringLiteral("Startup and policy settings (Ctrl+,)"));
+    if (settings)
+        m_settings->refresh();
 }
 
 void MainWindow::buildTray()
@@ -235,17 +321,15 @@ void MainWindow::sample()
     double gpuRpm = -1000.0;
 
     for (const FanStatus &status : statuses) {
+        std::optional<double> temp;
+        if (status.name == QStringLiteral("cpu"))
+            temp = cpuTemp;
+        else if (status.name == QStringLiteral("gpu"))
+            temp = gpuTemp;
+
         for (const QPointer<FanCard> &card : m_cards) {
-            if (card && card->fanName() == status.name) {
-                std::optional<double> temp;
-                if (status.name == QStringLiteral("cpu"))
-                    temp = cpuTemp;
-                else if (status.name == QStringLiteral("gpu"))
-                    temp = gpuTemp;
+            if (card && card->fanName() == status.name)
                 card->updateStatus(status, temp);
-                if (status.mode != ModeAuto && status.mode != ModeFull && status.mode != 1)
-                    card->showMessage(QStringLiteral("This mode is not managed by this tool."), true);
-            }
         }
 
         if (status.name == QStringLiteral("cpu"))
@@ -266,7 +350,7 @@ void MainWindow::sample()
     }
 
     m_pathLabel->setText(QStringLiteral("%1 · updated %2%3")
-                             .arg(m_machine.path,
+                             .arg(m_monitorName,
                                   QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")),
                                   m_trayUnavailable ? QStringLiteral(" · tray unavailable")
                                                     : QString()));
@@ -300,25 +384,6 @@ void MainWindow::requestMode(const QString &fan, ModeValue mode)
         } else {
             statusBar()->showMessage(result.message, 12000);
         }
-    });
-}
-
-void MainWindow::applyBootRestore(bool enable)
-{
-    m_bootCheck->setEnabled(false);
-    statusBar()->showMessage(enable ? QStringLiteral("Enabling boot restore…")
-                                   : QStringLiteral("Disabling boot restore…"));
-
-    controller::setBootRestore(enable, [this, enable](Result result) {
-        m_bootCheck->setEnabled(true);
-        if (!result.ok) {
-            m_syncingBootCheck = true;
-            m_bootCheck->setChecked(!enable);
-            m_syncingBootCheck = false;
-            statusBar()->showMessage(result.message, 12000);
-            return;
-        }
-        statusBar()->showMessage(result.message, 6000);
     });
 }
 
@@ -386,30 +451,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
 
     event->ignore();
-}
-
-void MainWindow::applyAutostart(bool enable)
-{
-    m_autostartCheck->setEnabled(false);
-    statusBar()->showMessage(enable ? QStringLiteral("Enabling background start…")
-                                    : QStringLiteral("Disabling background start…"));
-
-    const Result result = controller::setTrayAutostart(enable);
-    m_autostartCheck->setEnabled(true);
-
-    m_syncingAutostart = true;
-    m_autostartCheck->setChecked(result.ok ? enable : !enable);
-    m_syncingAutostart = false;
-
-    if (result.ok) {
-        statusBar()->showMessage(enable ? QStringLiteral("Vivobook Fan Control will start with your "
-                                                         "session and stay in the tray.")
-                                        : QStringLiteral("Vivobook Fan Control will no longer start "
-                                                         "with your session."),
-                                 8000);
-    } else {
-        statusBar()->showMessage(result.message, 12000);
-    }
 }
 
 }  // namespace fanctl

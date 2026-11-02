@@ -52,7 +52,7 @@ std::optional<double> readGpuTemp();
 QString modeName(int mode);
 QString fanDisplayName(const QString &name);
 
-// DMI board/product name, e.g. "M7400QE" on a Vivobook 14X.
+// Complete DMI machine name, e.g. "ASUS Vivobook M7400QE" on a Vivobook 14X.
 QString machineModel();
 
 // Wire words used by the CLI, the GUI and the root helper.

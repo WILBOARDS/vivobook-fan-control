@@ -6,19 +6,18 @@
 
 #include "core/sensors.h"
 
-class QCheckBox;
 class QCloseEvent;
 class QLabel;
+class QStackedWidget;
 class QSystemTrayIcon;
 class QTimer;
 class QToolButton;
-class QVBoxLayout;
 
 namespace fanctl {
 
 class FanCard;
 class HistoryChart;
-class PolicyPanel;
+class SettingsPage;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -34,29 +33,33 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
-    void buildCards();
-    void buildControls();
+    enum Page {
+        PageOverview = 0,
+        PageSettings = 1,
+    };
+
+    QWidget *buildOverview();
+    QWidget *buildSettings();
     void buildTray();
     void sample();
     void requestMode(const QString &fan, ModeValue mode);
-    void applyBootRestore(bool enable);
-    void applyAutostart(bool enable);
+    void showPage(Page page);
+    void syncPage();
 
     Machine m_machine;
     QString m_discoveryError;
+    QString m_deviceName;
+    QString m_monitorName;
     QList<QPointer<FanCard>> m_cards;
-    QVBoxLayout *m_root = nullptr;
+    QStackedWidget *m_pages = nullptr;
+    QToolButton *m_navButton = nullptr;
+    QLabel *m_headline = nullptr;
+    SettingsPage *m_settings = nullptr;
     HistoryChart *m_tempChart = nullptr;
     HistoryChart *m_rpmChart = nullptr;
-    QCheckBox *m_bootCheck = nullptr;
-    QCheckBox *m_autostartCheck = nullptr;
-    PolicyPanel *m_policyPanel = nullptr;
     QLabel *m_pathLabel = nullptr;
-    QLabel *m_headline = nullptr;
     QTimer *m_timer = nullptr;
     ::QSystemTrayIcon *m_tray = nullptr;
-    bool m_syncingBootCheck = false;
-    bool m_syncingAutostart = false;
     bool m_quitting = false;
     bool m_trayUnavailable = false;
 };

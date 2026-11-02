@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Builds the .deb without debhelper: stage the cmake install tree, then let
-# dpkg-deb pack it. Only needs the toolchain the app is built with.
+# Builds two .deb packages without debhelper: a headless command line package
+# and the graphical one that depends on it. Only needs the build toolchain.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 arch="$(dpkg --print-architecture)"
-stage="$root/debian/stage"
 out="$root/debian/out"
 
 version="$(sed -n 's/^project([[:space:]]*[a-z-]*[[:space:]]*VERSION[[:space:]]\+\([0-9.]*\).*/\1/p' CMakeLists.txt)"
@@ -20,47 +19,70 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBEXECDIR=libexec >/dev/null
 cmake --build build >/dev/null
 
-rm -rf "$stage"
-mkdir -p "$stage"
-DESTDIR="$stage" cmake --install build >/dev/null
+# package  stage dir      script dir  control stanza
+finish() {
+    local pkg="$1" stage="$2" scripts="$3"
+    local deb="$out/${pkg}_${version}_${arch}.deb"
 
-# Real shared library dependencies, resolved from the staged binaries.
-shlibvars="$root/debian/substvars"
-rm -f "$shlibvars"
-dpkg-shlibdeps -T"$shlibvars" \
-    "$stage/usr/bin/vivobook-fan-control" \
-    "$stage/usr/libexec/vivobook-fan-control/fancontrol-helper" \
-    "$stage/usr/libexec/vivobook-fan-control/fancontrol-policyd" >/dev/null
-shlibs="$(sed -n 's/^shlibs:Depends=//p' "$shlibvars")"
-if [[ -z "$shlibs" ]]; then
-    echo "dpkg-shlibdeps produced no dependency list" >&2
-    exit 1
-fi
+    rm -rf "$stage"
+    mkdir -p "$stage/DEBIAN"
+    DESTDIR="$stage" cmake --install build --component "$scripts" >/dev/null
 
-size="$(du -sk --exclude=DEBIAN "$stage" | cut -f1)"
+    local binaries=()
+    while IFS= read -r file; do binaries+=("$file"); done < <(find "$stage" -type f -perm -u+x ! -path "$stage/DEBIAN/*")
+    if ((${#binaries[@]} == 0)); then
+        echo "no binaries staged for $pkg" >&2
+        exit 1
+    fi
 
-mkdir -p "$stage/DEBIAN"
-# Only the binary stanza belongs in DEBIAN/control.
-awk '/^$/{blank=1; next} /^Package:/{found=1} found{if(blank)printf "\n"; blank=0; print}' debian/control |
-    sed -e "s|@VERSION@|$version|g" \
-        -e "s|@ARCH@|$arch|g" \
-        -e "s|@SIZE@|$size|g" \
-        -e "s|@SHLIBS@|$shlibs|g" \
-        >"$stage/DEBIAN/control"
+    local substvars="$stage/DEBIAN/substvars"
+    dpkg-shlibdeps -T"$substvars" "${binaries[@]}" >/dev/null
+    local shlibs
+    shlibs="$(sed -n 's/^shlibs:Depends=//p' "$substvars")"
+    if [[ -z "$shlibs" ]]; then
+        echo "dpkg-shlibdeps produced no dependency list for $pkg" >&2
+        exit 1
+    fi
+    rm -f "$substvars"
 
-for script in postinst prerm postrm; do
-    install -m 0755 "debian/$script" "$stage/DEBIAN/$script"
-done
+    local size
+    size="$(du -sk "$stage" | cut -f1)"
 
-find "$stage" -type f ! -path "$stage/DEBIAN/*" -printf '%P\n' | sort |
-    while read -r file; do
-        printf '%s  %s\n' "$(md5sum "$stage/$file" | cut -d' ' -f1)" "$file"
-    done >"$stage/DEBIAN/md5sums"
+    # Only the matching binary stanza belongs in DEBIAN/control.
+    awk -v pkg="$pkg" '/^Package:/{keep=($2==pkg)} keep' debian/control |
+        sed -e "s|@VERSION@|$version|g" \
+            -e "s|@ARCH@|$arch|g" \
+            -e "s|@SIZE@|$size|g" \
+            -e "s|@SHLIBS@|$shlibs|g" \
+            >"$stage/DEBIAN/control"
+    grep -q '^Package:' "$stage/DEBIAN/control" || { echo "no control stanza for $pkg" >&2; exit 1; }
+
+    if [[ -d "debian/$scripts" ]]; then
+        for script in postinst prerm postrm; do
+            if [[ -f "debian/$scripts/$script" ]]; then
+                install -m 0755 "debian/$scripts/$script" "$stage/DEBIAN/$script"
+            fi
+        done
+    fi
+
+    ( cd "$stage" && find . -type f ! -path './DEBIAN/*' -printf '%P\n' | sort |
+        while read -r file; do
+            printf '%s  %s\n' "$(md5sum "$file" | cut -d' ' -f1)" "$file"
+        done ) >"$stage/DEBIAN/md5sums"
+
+    dpkg-deb --root-owner-group -Zzstd -b "$stage" "$deb" >/dev/null
+    echo "built $deb"
+}
 
 mkdir -p "$out"
 rm -f "$out"/*.deb
-deb="$out/vivobook-fan-control_${version}_${arch}.deb"
-dpkg-deb --root-owner-group -Zzstd -b "$stage" "$deb" >/dev/null
 
-echo "built $deb"
-dpkg-deb -I "$deb" | sed -n '2,25p'
+finish vivobook-fan-control-cli debian/stage-cli cli
+finish vivobook-fan-control debian/stage-gui gui
+
+echo
+for deb in "$out"/*.deb; do
+    echo "--- $(basename "$deb")"
+    dpkg-deb -f "$deb" Package Version Depends | sed 's/^/    /'
+    dpkg-deb -c "$deb" | awk '$6 !~ /\/$/ {print "      " $6}'
+done

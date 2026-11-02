@@ -22,6 +22,7 @@ lets you switch between those two modes from the GUI or the shell.
 | Live readout | CPU and GPU fan RPM, plus CPU (`k10temp`) and GPU (`amdgpu`) temperatures, refreshed every 2 s |
 | Mode control | Switch each fan independently between **Automatic** and **Full speed** |
 | History graphs | 5-minute rolling charts for temperature and fan speed, painted with `QPainter` (no Qt Charts dependency) |
+| Two pages | The window keeps only what changes; startup options and the fan policy sit behind the gear |
 | Tray + background | Close the window and choose tray or quit (rememberable); optionally start with the session as a systemd user service |
 | Temperature policy | A root service that forces full speed above a threshold and back to automatic below it, per fan |
 | Restore at boot | Optionally re-apply your chosen modes early in the next boot via a systemd unit |
@@ -40,17 +41,18 @@ time with:
 rm ~/.config/vivobook-fan-control/vivobook-fan-control.conf
 ```
 
-**Start with your session.** Tick **Run in the background at login** and the app enables
-`vivobook-fan-control.service`, a systemd **user** unit that launches
-`vivobook-fan-control --tray` into your graphical session. A user service needs no
+**Start with your session.** On the **Settings** page, tick **Run in the background at
+login** and the app enables `vivobook-fan-control.service`, a systemd **user** unit that
+launches `vivobook-fan-control --tray` into your graphical session. A user service needs no
 administrator rights, so this checkbox never prompts for a password. A lock file keeps a
 manual launch from creating a second tray icon; if the app is already running in the
 background, starting it again just tells you so.
 
 ## Automatic fan policy
 
-Tick **Run the policy service in the background** to enable `vivobook-fan-policy.service`,
-a root service that watches temperatures and moves each fan on its own:
+On the **Settings** page, tick **Run the policy service in the background** to enable
+`vivobook-fan-policy.service`, a root service that watches temperatures and moves each fan
+on its own:
 
 - above the **full speed** threshold, the fan is forced to full speed
 - below the **back to automatic** threshold, control returns to the firmware
@@ -65,25 +67,40 @@ fan curve. While the service is on it owns the modes it manages, so a manual swi
 overridden on the next check. The unit runs sandboxed: `ProtectSystem=strict` with
 `ReadWritePaths=/sys`, `NoNewPrivileges`, `PrivateTmp` and `ProtectHome`.
 
-## Install the .deb
+## Install
 
-Download `vivobook-fan-control_1.1.0_amd64.deb` from the
-[latest release](https://github.com/WILBOARDS/vivobook-fan-control/releases/latest),
-then:
+Two downloads, from the
+[latest release](https://github.com/WILBOARDS/vivobook-fan-control/releases/latest):
+
+| File | Contains | Pulls in Qt GUI libs? |
+|---|---|---|
+| `vivobook-fan-control-cli_1.2.0_amd64.deb` | `vivobook-fanctl`, the root helper, the policy daemon, the polkit policy and both system units | **No** - Qt Core only |
+| `vivobook-fan-control_1.2.0_amd64.deb` | The Qt 6 window, desktop entry, icon and the login tray unit | Yes (and it depends on the CLI package) |
+
+**Command line only** — good for a minimal or headless install:
 
 ```bash
-# 1. Install (pulls in the Qt 6 runtime libraries automatically)
-sudo dpkg -i vivobook-fan-control_1.1.0_amd64.deb
-
-# 2. Fix up dependencies if dpkg reported any
-sudo apt --fix-broken install
-
-# 3. Confirm the controller was detected
+sudo apt install ./vivobook-fan-control-cli_1.2.0_amd64.deb
 vivobook-fanctl status
 ```
 
+**With the graphical window** — install both files together so the package manager can
+order the dependency:
+
+```bash
+sudo apt install ./vivobook-fan-control-cli_1.2.0_amd64.deb ./vivobook-fan-control_1.2.0_amd64.deb
+```
+
 Then launch **Vivobook Fan Control** from your application menu, or run
-`vivobook-fan-control` from a terminal. To remove it: `sudo apt remove vivobook-fan-control`.
+`vivobook-fan-control` from a terminal. To remove everything:
+`sudo apt remove vivobook-fan-control vivobook-fan-control-cli`.
+
+> Use `apt install ./file.deb`, not `dpkg -i`. When upgrading from 1.1.0 — a single
+> package that has since been split in two — `dpkg -i` unpacks the files in the order you
+> list them and the handover of `/usr/bin/vivobook-fanctl` and `/usr/libexec/…` to the new
+> CLI package can fail, leaving `vivobook-fan-control` unpacked but unconfigured. `apt`
+> resolves the order first. If you ever land in that state, `sudo dpkg -i
+> vivobook-fan-control-cli_*.deb` and then the GUI package fixes it.
 
 ## Build from source
 
@@ -101,12 +118,14 @@ cmake --build build
 #    polkit policy, so status works here but mode changes will be refused)
 ./build/vivobook-fan-control status
 
-# 4. Produce the .deb — no debhelper or root required
+# 4. Produce both .deb packages — no debhelper or root required
 ./scripts/build-deb.sh
-#    -> debian/out/vivobook-fan-control_1.1.0_amd64.deb
+#    -> debian/out/vivobook-fan-control-cli_1.2.0_amd64.deb
+#    -> debian/out/vivobook-fan-control_1.2.0_amd64.deb
 
-# 5. Install it
-sudo dpkg -i debian/out/vivobook-fan-control_1.1.0_amd64.deb
+# 5. Install them
+sudo apt install ./debian/out/vivobook-fan-control-cli_1.2.0_amd64.deb \
+                 ./debian/out/vivobook-fan-control_1.2.0_amd64.deb
 ```
 
 ## Command line
@@ -152,17 +171,23 @@ Restore at boot: disabled
 
 ## Graphical interface
 
-Each fan gets a card showing RPM, temperature, the mode currently reported by the
-firmware, and Automatic / Full speed buttons. The two graphs below keep the last five
-minutes of samples.
+The main page is what changes: each fan gets a card with RPM, temperature and Automatic /
+Full speed buttons, and the two graphs below keep the last five minutes of samples.
+Everything you set once lives behind the **gear** in the top-right corner (`Ctrl+,`).
 
 - **Blast both fans** forces both to full speed; **Return to automatic** hands control
   back to the firmware. Use the second one when you are done — full speed is meant for
   quick cooldown or diagnosing a fan, not as a permanent setting.
-- **Restore these fan modes at boot** enables `vivobook-fan-restore.service`, which
-  re-applies whatever modes you last chose.
-- Closing the window quits. The tray menu (when the desktop provides a StatusNotifier
-  host) offers the same actions without opening the window.
+- **Settings → Startup** holds **Restore these fan modes at boot**, which enables
+  `vivobook-fan-restore.service` so it re-applies whatever modes you last chose, and
+  **Run in the background at login**.
+- **Settings → Automatic fan policy** holds the service switch and the per-fan
+  thresholds described above.
+- Closing the window asks whether to keep running in the tray or quit. The tray menu
+  (when the desktop provides a StatusNotifier host) offers the same actions without
+  opening the window.
+
+![Vivobook Fan Control settings page](docs/screenshot-settings.png)
 
 ## How it works
 

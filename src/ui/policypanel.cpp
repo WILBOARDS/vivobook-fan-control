@@ -1,37 +1,38 @@
 #include "ui/policypanel.h"
 
 #include <QCheckBox>
-#include <QFormLayout>
 #include <QGridLayout>
-#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QSpinBox>
-#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "core/controller.h"
 #include "core/policyconfig.h"
+#include "ui/style.h"
 
 namespace fanctl {
 
-PolicyPanel::PolicyPanel(QWidget *parent) : QFrame(parent)
+PolicyPanel::PolicyPanel(QWidget *parent) : QGroupBox(QStringLiteral("Automatic fan policy"), parent)
 {
-    auto *title = new QLabel(QStringLiteral("Automatic fan policy"), this);
-    QFont titleFont = title->font();
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    auto *layout = new QVBoxLayout(this);
+    style::applySection(layout);
 
     m_enabled = new QCheckBox(QStringLiteral("Run the policy service in the background"), this);
     m_enabled->setToolTip(QStringLiteral(
         "Enables vivobook-fan-policy.service, a root service that forces the fans to full speed "
         "above the trigger temperature and back to automatic below the release temperature."));
 
+    m_note = new QLabel(this);
+    style::applyHint(m_note);
+
     auto makeSpin = [this](int value) {
         auto *spin = new QSpinBox(this);
         spin->setRange(30, 110);
         spin->setSuffix(QStringLiteral(" °C"));
         spin->setValue(value);
+        spin->setFixedWidth(96);
         return spin;
     };
 
@@ -45,41 +46,39 @@ PolicyPanel::PolicyPanel(QWidget *parent) : QFrame(parent)
     m_interval->setRange(2, 60);
     m_interval->setSuffix(QStringLiteral(" s"));
     m_interval->setValue(config.intervalSeconds);
+    m_interval->setFixedWidth(96);
 
+    // One grid for both fans and the poll interval so every column stays aligned.
     auto *grid = new QGridLayout;
-    grid->addWidget(new QLabel(QStringLiteral("CPU"), this), 1, 0);
-    grid->addWidget(new QLabel(QStringLiteral("GPU"), this), 2, 0);
+    grid->setHorizontalSpacing(style::kSectionGap);
+    grid->setVerticalSpacing(style::kControlGap);
     grid->addWidget(new QLabel(QStringLiteral("Full speed above"), this), 0, 1);
     grid->addWidget(new QLabel(QStringLiteral("Back to automatic below"), this), 0, 2);
+    grid->addWidget(new QLabel(QStringLiteral("CPU"), this), 1, 0);
     grid->addWidget(m_cpuFull, 1, 1);
     grid->addWidget(m_cpuRelease, 1, 2);
+    grid->addWidget(new QLabel(QStringLiteral("GPU"), this), 2, 0);
     grid->addWidget(m_gpuFull, 2, 1);
     grid->addWidget(m_gpuRelease, 2, 2);
+    grid->addWidget(new QLabel(QStringLiteral("Check every"), this), 3, 0);
+    grid->addWidget(m_interval, 3, 1);
+    grid->setColumnStretch(3, 1);
 
-    auto *intervalRow = new QHBoxLayout;
-    intervalRow->addWidget(new QLabel(QStringLiteral("Check every"), this));
-    intervalRow->addWidget(m_interval);
-    intervalRow->addStretch();
+    m_apply = new QPushButton(QStringLiteral("Apply thresholds"), this);
+    m_apply->setToolTip(QStringLiteral("Writes the thresholds to the policy service's config file."));
+    auto *applyRow = new QHBoxLayout;
+    applyRow->addStretch();
+    applyRow->addWidget(m_apply);
 
-    m_apply = new QToolButton(this);
-    m_apply->setText(QStringLiteral("Apply thresholds"));
+    layout->addWidget(m_enabled);
+    layout->addWidget(m_note);
+    layout->addSpacing(style::kGap);
+    layout->addLayout(grid);
+    layout->addLayout(applyRow);
 
-    m_note = new QLabel(this);
-    m_note->setWordWrap(true);
-    m_note->setStyleSheet(QStringLiteral("color: palette(mid)"));
-
-    QObject::connect(m_apply, &QToolButton::clicked, this, &PolicyPanel::applyThresholds);
+    QObject::connect(m_apply, &QPushButton::clicked, this, &PolicyPanel::applyThresholds);
     QObject::connect(m_enabled, &QCheckBox::toggled, this, &PolicyPanel::toggleService);
 
-    auto *layout = new QVBoxLayout(this);
-    layout->addWidget(title);
-    layout->addWidget(m_enabled);
-    layout->addLayout(grid);
-    layout->addLayout(intervalRow);
-    layout->addWidget(m_apply);
-    layout->addWidget(m_note);
-
-    setFrameShape(QFrame::StyledPanel);
     reload();
 }
 
@@ -90,8 +89,8 @@ void PolicyPanel::reload()
     m_syncing = false;
 
     m_note->setText(m_enabled->isChecked()
-                        ? QStringLiteral("The service re-reads these values every check, so applying "
-                                         "takes effect without a restart. Manual switches still work "
+                        ? QStringLiteral("The service re-reads these values on every check, so applying "
+                                         "takes effect without a restart. Manual switches still work, "
                                          "but the policy can move the fan again on the next check.")
                         : QStringLiteral("While this is off, the fans stay exactly where you and the "
                                          "firmware leave them."));

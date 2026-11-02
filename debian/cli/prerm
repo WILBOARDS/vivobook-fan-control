@@ -5,6 +5,7 @@ case "$1" in
     remove|deconfigure)
         if command -v systemctl >/dev/null 2>&1; then
             systemctl disable --now vivobook-fan-restore.service >/dev/null 2>&1 || true
+            systemctl disable --now vivobook-fan-policy.service >/dev/null 2>&1 || true
         fi
         ;;
 esac

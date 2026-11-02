@@ -221,15 +221,29 @@ bool modeFromWord(const QString &word, ModeValue *mode)
     return false;
 }
 
+// The DMI identity files are world-readable and carry the same strings that
+// `dmidecode -s` prints, so the complete name needs no root and no subprocess.
 QString machineModel()
 {
-    for (const QString &path : {QStringLiteral("/sys/class/dmi/id/board_name"),
-                                QStringLiteral("/sys/class/dmi/id/product_name")}) {
-        const QString value = readFirstLine(path);
-        if (!value.isEmpty())
-            return value;
+    QString brand = readFirstLine(QStringLiteral("/sys/class/dmi/id/sys_vendor"))
+                        .section(QLatin1Char(' '), 0, 0);
+    if (brand.compare(QLatin1String("ASUSTeK"), Qt::CaseInsensitive) == 0)
+        brand = QStringLiteral("ASUS");  // the brand people use, not the legal entity
+
+    const QString family = readFirstLine(QStringLiteral("/sys/class/dmi/id/product_family"));
+    // ASUS packs product_name as "<family>_<series><model>_<model>", so the model is
+    // the last underscore-separated segment.
+    QString model = readFirstLine(QStringLiteral("/sys/class/dmi/id/product_name"))
+                        .section(QLatin1Char('_'), -1);
+    if (model.isEmpty())
+        model = readFirstLine(QStringLiteral("/sys/class/dmi/id/board_name"));
+
+    QStringList parts;
+    for (const QString &part : {brand, family, model}) {
+        if (!part.isEmpty() && !parts.contains(part))
+            parts << part;
     }
-    return QStringLiteral("ASUS Vivobook");
+    return parts.isEmpty() ? QStringLiteral("ASUS Vivobook") : parts.join(QLatin1Char(' '));
 }
 
 QString fanDisplayName(const QString &name)
