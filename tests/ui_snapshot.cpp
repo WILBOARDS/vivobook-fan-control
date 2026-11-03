@@ -6,6 +6,7 @@
 #include <QTimer>
 
 #include "ui/mainwindow.h"
+#include "ui/theme.h"
 
 int main(int argc, char *argv[])
 {
@@ -14,6 +15,13 @@ int main(int argc, char *argv[])
     if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
+    QApplication::setApplicationName(QStringLiteral("vivobook-fan-control"));
+    QApplication::setOrganizationName(QStringLiteral("vivobook-fan-control"));
+
+    // Same start-up sequence as main.cpp, so the snapshot shows the theme the
+    // installed app would use.
+    fanctl::theme::captureSystem(&app);
+    fanctl::theme::apply(&app, fanctl::theme::stored());
 
     const QString output = argc > 1 ? QString::fromLocal8Bit(argv[1])
                                     : QStringLiteral("/tmp/fancontrol-gui.png");

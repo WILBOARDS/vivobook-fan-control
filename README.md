@@ -23,6 +23,7 @@ lets you switch between those two modes from the GUI or the shell.
 | Mode control | Switch each fan independently between **Automatic** and **Full speed** |
 | History graphs | 5-minute rolling charts for temperature and fan speed, painted with `QPainter` (no Qt Charts dependency) |
 | Two pages | The window keeps only what changes; startup options and the fan policy sit behind the gear |
+| Theme | **System** follows your desktop palette; **Light** and **Dark** are built in and apply without a restart |
 | Tray + background | Close the window and choose tray or quit (rememberable); optionally start with the session as a systemd user service |
 | Temperature policy | A root service that forces full speed above a threshold and back to automatic below it, per fan |
 | Restore at boot | Optionally re-apply your chosen modes early in the next boot via a systemd unit |
@@ -74,13 +75,13 @@ Two downloads, from the
 
 | File | Contains | Pulls in Qt GUI libs? |
 |---|---|---|
-| `vivobook-fan-control-cli_1.2.0_amd64.deb` | `vivobook-fanctl`, the root helper, the policy daemon, the polkit policy and both system units | **No** - Qt Core only |
-| `vivobook-fan-control_1.2.0_amd64.deb` | The Qt 6 window, desktop entry, icon and the login tray unit | Yes (and it depends on the CLI package) |
+| `vivobook-fan-control-cli_1.3.1_amd64.deb` | `vivobook-fanctl`, the root helper, the policy daemon, the polkit policy and both system units | **No** - Qt Core only |
+| `vivobook-fan-control_1.3.1_amd64.deb` | The Qt 6 window, desktop entry, icon and the login tray unit | Yes (and it depends on the CLI package) |
 
 **Command line only** — good for a minimal or headless install:
 
 ```bash
-sudo apt install ./vivobook-fan-control-cli_1.2.0_amd64.deb
+sudo apt install ./vivobook-fan-control-cli_1.3.1_amd64.deb
 vivobook-fanctl status
 ```
 
@@ -88,7 +89,7 @@ vivobook-fanctl status
 order the dependency:
 
 ```bash
-sudo apt install ./vivobook-fan-control-cli_1.2.0_amd64.deb ./vivobook-fan-control_1.2.0_amd64.deb
+sudo apt install ./vivobook-fan-control-cli_1.3.1_amd64.deb ./vivobook-fan-control_1.3.1_amd64.deb
 ```
 
 Then launch **Vivobook Fan Control** from your application menu, or run
@@ -120,12 +121,12 @@ cmake --build build
 
 # 4. Produce both .deb packages — no debhelper or root required
 ./scripts/build-deb.sh
-#    -> debian/out/vivobook-fan-control-cli_1.2.0_amd64.deb
-#    -> debian/out/vivobook-fan-control_1.2.0_amd64.deb
+#    -> debian/out/vivobook-fan-control-cli_1.3.1_amd64.deb
+#    -> debian/out/vivobook-fan-control_1.3.1_amd64.deb
 
 # 5. Install them
-sudo apt install ./debian/out/vivobook-fan-control-cli_1.2.0_amd64.deb \
-                 ./debian/out/vivobook-fan-control_1.2.0_amd64.deb
+sudo apt install ./debian/out/vivobook-fan-control-cli_1.3.1_amd64.deb \
+                 ./debian/out/vivobook-fan-control_1.3.1_amd64.deb
 ```
 
 ## Command line
@@ -178,6 +179,9 @@ Everything you set once lives behind the **gear** in the top-right corner (`Ctrl
 - **Blast both fans** forces both to full speed; **Return to automatic** hands control
   back to the firmware. Use the second one when you are done — full speed is meant for
   quick cooldown or diagnosing a fan, not as a permanent setting.
+- **Settings → Appearance** picks the palette: **System** takes whatever the desktop
+  theme provides, **Light** and **Dark** are the two built-in ones. The choice applies
+  straight away and is remembered for the next start.
 - **Settings → Startup** holds **Restore these fan modes at boot**, which enables
   `vivobook-fan-restore.service` so it re-applies whatever modes you last chose, and
   **Run in the background at login**.

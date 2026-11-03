@@ -3,6 +3,7 @@
 #include <QFrame>
 
 class QCheckBox;
+class QComboBox;
 
 namespace fanctl {
 
@@ -22,6 +23,8 @@ public:
 
 signals:
     void statusMessage(const QString &text, bool error);
+    // The palette changed, so anything drawn from the old colours needs a redo.
+    void themeChanged();
 
 private:
     void applyBootRestore(bool enable);
@@ -29,6 +32,7 @@ private:
 
     QCheckBox *m_bootCheck = nullptr;
     QCheckBox *m_autostartCheck = nullptr;
+    QComboBox *m_theme = nullptr;
     PolicyPanel *m_policy = nullptr;
     bool m_syncingBoot = false;
     bool m_syncingAutostart = false;

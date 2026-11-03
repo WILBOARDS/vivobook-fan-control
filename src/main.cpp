@@ -9,6 +9,7 @@
 
 #include "cli.h"
 #include "ui/mainwindow.h"
+#include "ui/theme.h"
 
 int main(int argc, char *argv[])
 {
@@ -32,6 +33,11 @@ int main(int argc, char *argv[])
     QApplication::setApplicationVersion(QStringLiteral(APP_VERSION));
     QApplication::setDesktopFileName(QStringLiteral("vivobook-fan-control"));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("vivobook-fan-control")));
+
+    // Capture before anything overrides it, so the System choice has something
+    // to return to, then apply the stored theme before the first window exists.
+    fanctl::theme::captureSystem(&app);
+    fanctl::theme::apply(&app, fanctl::theme::stored());
 
     // The login service and a manual launch would otherwise leave two tray icons
     // fighting over the same fans.

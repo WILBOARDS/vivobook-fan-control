@@ -99,6 +99,21 @@ bool statusNotifierRegistered()
                   QStringLiteral("org.kde.StatusNotifierWatcher"));
 }
 
+// A tray host resolves IconName through its own icon theme, which does not know
+// ours unless the hicolor fallback is searched. Carrying only pixmaps leaves the
+// host nothing to fail at: the artwork is already in the DBus message.
+QIcon trayIcon()
+{
+    QIcon themed = QIcon::fromTheme(QStringLiteral("vivobook-fan-control"));
+    if (themed.isNull())
+        return appIcon();
+
+    QIcon icon;
+    for (int size : {16, 22, 24, 32, 48, 64})
+        icon.addPixmap(themed.pixmap(size, size));
+    return icon.isNull() ? appIcon() : icon;
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
@@ -126,7 +141,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     headlineFont.setBold(true);
     headlineFont.setPointSizeF(headlineFont.pointSizeF() * 1.15);
     m_headline->setFont(headlineFont);
-    m_headline->setWordWrap(true);
+    // One line: the model reads as a name, and a name broken over three lines
+    // reads as three separate things.
     m_headline->setText(m_deviceName);
 
     m_navButton = new QToolButton(central);
@@ -138,11 +154,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         "QToolButton{border:1px solid palette(Mid);border-radius:0;background:transparent;}"
         "QToolButton:hover{border-color:palette(Dark);background:palette(Mid);}"
         "QToolButton:pressed{border-color:palette(Dark);background:palette(Dark);}"));
-    m_navButton->setAccessibleName(QStringLiteral("Settings"));
-    m_navButton->setToolTip(QStringLiteral("Startup and policy settings (Ctrl+,)"));
     m_navButton->setShortcut(QKeySequence::Preferences);
-    m_navButton->setIcon(navIcon(QStringLiteral("gear"),
-                                 m_navButton->palette().color(QPalette::ButtonText)));
+    syncNavButton();
     QObject::connect(m_navButton, &QToolButton::clicked, this, [this] {
         if (!m_pages)
             return;
@@ -246,6 +259,7 @@ QWidget *MainWindow::buildSettings()
                      [this](const QString &text, bool error) {
                          statusBar()->showMessage(text, error ? 12000 : 6000);
                      });
+    QObject::connect(m_settings, &SettingsPage::themeChanged, this, &MainWindow::syncNavButton);
 
     auto *back = new QShortcut(QKeySequence::Cancel, m_settings);
     back->setContext(Qt::WidgetWithChildrenShortcut);
@@ -263,14 +277,22 @@ void MainWindow::syncPage()
 {
     const bool settings = m_pages->currentIndex() == PageSettings;
     m_headline->setText(settings ? QStringLiteral("Settings") : m_deviceName);
+    syncNavButton();
+    if (settings)
+        m_settings->refresh();
+}
+
+void MainWindow::syncNavButton()
+{
+    const bool settings = m_pages && m_pages->currentIndex() == PageSettings;
+    // The application palette, because the copy that reaches this button only
+    // lands on the next turn of the event loop.
     m_navButton->setIcon(navIcon(settings ? QStringLiteral("back") : QStringLiteral("gear"),
-                                 m_navButton->palette().color(QPalette::ButtonText)));
+                                 qApp->palette().color(QPalette::ButtonText)));
     m_navButton->setAccessibleName(settings ? QStringLiteral("Back")
                                             : QStringLiteral("Settings"));
     m_navButton->setToolTip(settings ? QStringLiteral("Back to the fans (Esc)")
                                      : QStringLiteral("Startup and policy settings (Ctrl+,)"));
-    if (settings)
-        m_settings->refresh();
 }
 
 void MainWindow::buildTray()
@@ -280,7 +302,7 @@ void MainWindow::buildTray()
         return;
     }
 
-    m_tray = new QSystemTrayIcon(appIcon(), this);
+    m_tray = new QSystemTrayIcon(trayIcon(), this);
     auto *menu = new QMenu(this);
     menu->addAction(QStringLiteral("Show window"), this, [this] {
         showNormal();

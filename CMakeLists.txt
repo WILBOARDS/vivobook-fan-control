@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(vivobook-fan-control VERSION 1.2.0 LANGUAGES CXX)
+project(vivobook-fan-control VERSION 1.3.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,6 +34,7 @@ qt_add_executable(vivobook-fan-control
     src/ui/historychart.cpp
     src/ui/policypanel.cpp
     src/ui/settingspage.cpp
+    src/ui/theme.cpp
     src/ui/mainwindow.cpp
 )
 target_link_libraries(vivobook-fan-control PRIVATE fancore Qt6::Core Qt6::Gui Qt6::DBus Qt6::Widgets)
@@ -50,7 +51,7 @@ if(BUILD_UI_SNAPSHOT)
     target_link_libraries(ui-snapshot PRIVATE fancore Qt6::Core Qt6::Gui Qt6::DBus Qt6::Widgets)
     target_sources(ui-snapshot PRIVATE src/ui/fancard.cpp src/ui/historychart.cpp
                                        src/ui/policypanel.cpp src/ui/settingspage.cpp
-                                       src/ui/mainwindow.cpp)
+                                       src/ui/theme.cpp src/ui/mainwindow.cpp)
 endif()
 
 include(GNUInstallDirs)

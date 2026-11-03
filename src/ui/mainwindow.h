@@ -45,6 +45,8 @@ private:
     void requestMode(const QString &fan, ModeValue mode);
     void showPage(Page page);
     void syncPage();
+    // The glyph is painted from the palette, so a theme change means painting it again.
+    void syncNavButton();
 
     Machine m_machine;
     QString m_discoveryError;
